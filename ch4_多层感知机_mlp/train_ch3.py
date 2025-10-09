@@ -87,10 +87,10 @@ def train_epoch_ch3(net, train_iter, loss, updater):
         l = loss(y_hat, y)  #计算损失
         if isinstance(updater, torch.optim.Optimizer):
             updater.zero_grad()  #清除梯度
-            l.mean().backward()  #反向传播
+            l.mean().backward()  #反向传播 当使用pytorch优化器时
             updater.step()  #更新参数
         else:
-            l.sum().backward()  #反向传播
+            l.sum().backward()  #反向传播 使用自定义损失函数
             updater(X.shape[0])  #更新参数
         metric.add(l.sum(), accuracy(y_hat, y), y.numel())  #累加损失、准确率和样本数量
     return metric[0] / metric[2], metric[1] / metric[2]  #返回平均损失和平均准确率

@@ -117,6 +117,8 @@ for epoch in range(num_epochs):
         # 并以此计算关于[w,b]的梯度
         l.sum().backward() # 自动微分计算梯度
         sgd([w, b], lr, batch_size)  # 使用参数的梯度更新参数
+    
+    # evaluation 评估本次迭代周期的训练结果
     with torch.no_grad():
         train_l = loss(net(features, w, b), labels)
         print(f'epoch {epoch + 1}, loss {float(train_l.mean()):f}')
