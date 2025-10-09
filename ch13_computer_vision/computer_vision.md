@@ -1,3 +1,4 @@
+- [图像增广](#图像增广)
 - [模型微调 fine-tuning](#模型微调-fine-tuning)
   - [锚框 anchor](#锚框-anchor)
 - [语义分割 semantic-segmentation](#语义分割-semantic-segmentation)
@@ -7,6 +8,10 @@
 可以改进模型泛化的方法：
 1. 图像增广
 2. 模型微调
+
+# 图像增广
+
+通过翻转、裁剪、对颜色空间，亮度等变量调整使得图像增强，提高模型的泛化性
 
 # 模型微调 fine-tuning
 迁移学习（transfer learning）将从源数据集学到的知识迁移到目标数据集
