@@ -208,4 +208,4 @@ __marimo__/
 d2l-zh/
 epoch_*.png
 submission.csv
-*.png
+./*.png

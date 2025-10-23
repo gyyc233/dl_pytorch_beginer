@@ -80,6 +80,7 @@ class NWKernelRegression(nn.Module):
 
 
 # 训练 将训练数据集变换为键和值用于训练注意力模型
+# 任何一个训练样本的输入都会和除自己以外的所有训练样本的“键－值”对进行计算， 从而得到其对应的预测输出
 
 # X_tile的形状:(n_train，n_train)，每一行都包含着相同的训练输入
 X_tile = x_train.repeat((n_train, 1))
