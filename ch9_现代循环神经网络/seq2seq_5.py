@@ -122,3 +122,193 @@ seq_mask = sequence_mask(X, torch.tensor([1, 2]))
 # valid_len=[1, 2] 表示第一行只有1个有效元素，第二行有2个有效元素
 # 结果会将第一行的第2、3个元素和第二行的第3个元素屏蔽（设为0）
 print('seq_mask: ', seq_mask)
+
+
+# 通过扩展softmax交叉熵损失函数来遮蔽不相关的预测
+#@save
+class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
+    """带遮蔽的softmax交叉熵损失函数"""
+    # pred的形状：(batch_size,num_steps,vocab_size)
+    # label的形状：(batch_size,num_steps)
+    # valid_len的形状：(batch_size,)
+    def forward(self, pred, label, valid_len):
+        '''
+        pred: 模型的预测结果 [batch_size, num_steps, vocab_size] 批次大小、序列长度和词汇表大小
+        label: 真实标签
+        valid_len: 每个样本的有效长度
+        '''
+        # 刚开始，所有预测词元的掩码设置为1,形状与标签相同
+        weights = torch.ones_like(label)
+        # 对weights 将超出valid_len有效长度的部分置为0
+        weights = sequence_mask(weights, valid_len)
+
+        # 设置 self.reduction='none' 以获得每个元素的原始损失值
+        self.reduction='none'
+
+        # 调用父类方法计算未加权的损失，将预测张量的维度从 (batch_size, num_steps, vocab_size) 调整为 (batch_size, vocab_size, num_steps)
+        unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(
+            pred.permute(0, 2, 1), label)
+        # 将未加权损失与权重相乘得到加权损失，再对时间步维度取平均值
+        weighted_loss = (unweighted_loss * weights).mean(dim=1)
+        return weighted_loss
+
+
+loss = MaskedSoftmaxCELoss()
+mask_soft_max_loss = loss(torch.ones(3, 4, 10), torch.ones((3, 4), dtype=torch.long),
+     torch.tensor([4, 2, 0]))
+print('mask_soft_max_loss: ', mask_soft_max_loss)
+
+
+# 训练
+# 特定的序列开始词元（“<bos>”）和 原始的输出序列（不包括序列结束词元“<eos>”） 拼接在一起作为解码器的输入
+#@save
+def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
+    """训练序列到序列模型"""
+    def xavier_init_weights(m):
+        # 使用xavier_uniform_初始化线性层与门控网络
+        if type(m) == nn.Linear:
+            nn.init.xavier_uniform_(m.weight)
+        if type(m) == nn.GRU:
+            for param in m._flat_weights_names:
+                if "weight" in param:
+                    nn.init.xavier_uniform_(m._parameters[param])
+
+    net.apply(xavier_init_weights)
+    net.to(device)
+    # 使用adam优化器
+    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    loss = MaskedSoftmaxCELoss()
+    net.train()
+    animator = d2l.Animator(xlabel='epoch', ylabel='loss',
+                     xlim=[10, num_epochs])
+    
+    # 训练循环
+    for epoch in range(num_epochs):
+        timer = d2l.Timer()
+        metric = d2l.Accumulator(2)  # 训练损失总和，词元数量
+
+        # 每个批次处理
+        for batch in data_iter:
+            optimizer.zero_grad()
+
+            # X: 输入序列; X_valid_len: 输入序列的有效长度；Y：目标序列；Y_valid_len: 目标序列的有效长度
+            X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
+            
+            # 为每个样本添加开始标记
+            bos = torch.tensor([tgt_vocab['<bos>']] * Y.shape[0],
+                          device=device).reshape(-1, 1)
+            
+            # 将 <bos> 与目标序列的前n-1个元素拼接，形成解码器输入
+            dec_input = torch.cat([bos, Y[:, :-1]], 1)
+
+            # 前向传播与计算损失
+            Y_hat, _ = net(X, dec_input, X_valid_len)
+            l = loss(Y_hat, Y, Y_valid_len)
+            l.sum().backward()      # 损失函数的标量进行“反向传播”
+            d2l.grad_clipping(net, 1) # 梯度裁剪
+            num_tokens = Y_valid_len.sum()
+            optimizer.step()
+
+            # 累计损失与处理过的词元数量
+            with torch.no_grad():
+                metric.add(l.sum(), num_tokens)
+
+        # 每10次迭代输出一次损失与处理速度
+        if (epoch + 1) % 10 == 0:
+            animator.add(epoch + 1, (metric[0] / metric[1],))
+    print(f'loss {metric[0] / metric[1]:.3f}, {metric[1] / timer.stop():.1f} '
+        f'tokens/sec on {str(device)}')
+    
+# 序列到序列的训练过程
+# embed_size 嵌入层维度32；num_hiddens：RNN隐藏层单元数32；num_layers：RNN层数2
+embed_size, num_hiddens, num_layers, dropout = 32, 32, 2, 0.1
+# 每个批次包含样本64，序列最大长度为10个时间步
+batch_size, num_steps = 64, 10
+lr, num_epochs, device = 0.005, 300, d2l.try_gpu()
+
+# 加载机器翻译数据集
+train_iter, src_vocab, tgt_vocab = d2l.load_data_nmt(batch_size, num_steps)
+
+# 编码器 使用源语言词汇表创建
+encoder = Seq2SeqEncoder(len(src_vocab), embed_size, num_hiddens, num_layers,
+                        dropout)
+
+# 解码器 使用目标语言词汇表创建
+decoder = Seq2SeqDecoder(len(tgt_vocab), embed_size, num_hiddens, num_layers,
+                        dropout)
+
+# 开始训练
+net = encoder_decoder_4.EncoderDecoder(encoder, decoder)
+train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device)
+
+
+# 预测 通过<bos> <eos>管理每次的预测
+#@save
+def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
+                    device, save_attention_weights=False):
+    """序列到序列模型的预测"""
+    # 在预测时将net设置为评估模式
+    net.eval()
+    # 将输入句子转小写并分词，添加序列结束标记
+    src_tokens = src_vocab[src_sentence.lower().split(' ')] + [
+        src_vocab['<eos>']]
+    # 计算输入序列的有效长度
+    enc_valid_len = torch.tensor([len(src_tokens)], device=device)
+    # 填充到固定长度
+    src_tokens = d2l.truncate_pad(src_tokens, num_steps, src_vocab['<pad>'])
+    
+    # 添加批次维度，使形状从 [seq_len] 变为 [1, seq_len]
+    enc_X = torch.unsqueeze(
+        torch.tensor(src_tokens, dtype=torch.long, device=device), dim=0)
+    
+    # 编码，得到上下文表示
+    enc_outputs = net.encoder(enc_X, enc_valid_len)
+    # 初始化解码器状态
+    dec_state = net.decoder.init_state(enc_outputs, enc_valid_len)
+    
+    # 初始化解码器输入为开始标记 <bos>
+    dec_X = torch.unsqueeze(torch.tensor(
+        [tgt_vocab['<bos>']], dtype=torch.long, device=device), dim=0)
+    
+    output_seq, attention_weight_seq = [], []
+    # 逐词生成循环
+    for _ in range(num_steps):
+        Y, dec_state = net.decoder(dec_X, dec_state)
+        # 我们使用具有预测最高可能性的词元，作为解码器在下一时间步的输入
+        dec_X = Y.argmax(dim=2)
+        pred = dec_X.squeeze(dim=0).type(torch.int32).item()
+        # 保存注意力权重
+        if save_attention_weights:
+            attention_weight_seq.append(net.decoder.attention_weights)
+        # 一旦序列结束词元被预测，输出序列的生成就完成了
+        if pred == tgt_vocab['<eos>']:
+            break
+        output_seq.append(pred)
+    return ' '.join(tgt_vocab.to_tokens(output_seq)), attention_weight_seq
+
+
+# 预测序列的评估函数 当预测序列与标签序列完全相同时，BLEU为1
+def bleu(pred_seq, label_seq, k):  #@save
+    """计算BLEU"""
+    pred_tokens, label_tokens = pred_seq.split(' '), label_seq.split(' ')
+    len_pred, len_label = len(pred_tokens), len(label_tokens)
+    score = math.exp(min(0, 1 - len_label / len_pred))
+    for n in range(1, k + 1):
+        num_matches, label_subs = 0, collections.defaultdict(int)
+        for i in range(len_label - n + 1):
+            label_subs[' '.join(label_tokens[i: i + n])] += 1
+        for i in range(len_pred - n + 1):
+            if label_subs[' '.join(pred_tokens[i: i + n])] > 0:
+                num_matches += 1
+                label_subs[' '.join(pred_tokens[i: i + n])] -= 1
+        score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
+    return score
+
+
+# 利用训练好的循环神经网络“编码器－解码器”模型， 将几个英语句子翻译成法语，并计算BLEU的最终结果
+engs = ['go .', "i lost .", 'he\'s calm .', 'i\'m home .']
+fras = ['va !', 'j\'ai perdu .', 'il est calme .', 'je suis chez moi .']
+for eng, fra in zip(engs, fras):
+    translation, attention_weight_seq = predict_seq2seq(
+        net, eng, src_vocab, tgt_vocab, num_steps, device)
+    print(f'{eng} => {translation}, bleu {bleu(translation, fra, k=2):.3f}')
