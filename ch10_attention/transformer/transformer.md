@@ -6,6 +6,7 @@
     - [多个编码器模块堆叠](#多个编码器模块堆叠)
   - [解码器](#解码器)
     - [多个解码器堆叠](#多个解码器堆叠)
+  - [训练](#训练)
 
 # Transformer
 
@@ -223,33 +224,93 @@ class TransformerDecoder(d2l.AttentionDecoder):
         super(TransformerDecoder, self).__init__(**kwargs)
         self.num_hiddens = num_hiddens
         self.num_layers = num_layers
-        self.embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = d2l.PositionalEncoding(num_hiddens, dropout)
-        self.blks = nn.Sequential()
+        self.embedding = nn.Embedding(vocab_size, num_hiddens) # 词嵌入层
+        self.pos_encoding = d2l.PositionalEncoding(num_hiddens, dropout) # 位置编码
+        self.blks = nn.Sequential() # 解码器堆叠
         for i in range(num_layers):
             self.blks.add_module("block"+str(i),
                 DecoderBlock(key_size, query_size, value_size, num_hiddens,
                              norm_shape, ffn_num_input, ffn_num_hiddens,
                              num_heads, dropout, i))
-        self.dense = nn.Linear(num_hiddens, vocab_size)
+        self.dense = nn.Linear(num_hiddens, vocab_size) # 输出前的全连接层
 
     def init_state(self, enc_outputs, enc_valid_lens, *args):
+        '''
+        enc_outputs：编码器输出
+        enc_valid_lens：编码器有效长度，处理变长序列
+        '''
+        # [None] * self.num_layers 解码器各层的历史状态缓存
         return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
 
     def forward(self, X, state):
+        # 对输入进行词嵌入与位置编码
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+
+        # 收集 解码器自注意力权重 与 编码器-解码器注意力权重
         self._attention_weights = [[None] * len(self.blks) for _ in range (2)]
+        # 通过多个解码器处理输入
         for i, blk in enumerate(self.blks):
             X, state = blk(X, state)
             # 解码器自注意力权重
             self._attention_weights[0][
                 i] = blk.attention1.attention.attention_weights
-            # “编码器－解码器”自注意力权重
+            # 编码器－解码器 自注意力权重
             self._attention_weights[1][
                 i] = blk.attention2.attention.attention_weights
+
+        # 通过线性层映射到词汇表空间
         return self.dense(X), state
 
     @property
     def attention_weights(self):
+        '''
+        注意力权重访问
+        '''
+        # 对解码过程中产生的注意力权重的访问
         return self._attention_weights
+```
+
+## 训练
+
+依照Transformer架构来实例化编码器－解码器模型。在这里，指定Transformer的编码器和解码器都是2层，都使用4头注意力
+
+为了进行序列到序列的学习，下面在“英语－法语”机器翻译数据集上训练Transformer模型
+
+```python
+# num_hiddens：隐藏层维度
+# num_layers：编码器，解码器的堆叠层数
+# batch_size：每个批次包含64个样本
+# num_steps：序列最大长度为10个token
+num_hiddens, num_layers, dropout, batch_size, num_steps = 32, 2, 0.1, 64, 10
+lr, num_epochs, device = 0.005, 200, d2l.try_gpu() # 学习率，训练轮数200，设备
+# ffn_num_input：前馈网络的输入维度
+# ffn_num_hiddens：前馈网络隐藏层维度
+# num_heads：注意力头数
+ffn_num_input, ffn_num_hiddens, num_heads = 32, 64, 4
+
+# 注意力机制中Q、K、V的维度均为32
+key_size, query_size, value_size = 32, 32, 32
+# LayerNorm的归一化维度
+norm_shape = [32]
+
+# 加载英语-法语机器翻译数据集，创建训练迭代器与词汇表
+train_iter, src_vocab, tgt_vocab = d2l.load_data_nmt(batch_size, num_steps)
+
+# 编码器实例化
+encoder = TransformerEncoder(
+    len(src_vocab), key_size, query_size, value_size, num_hiddens,
+    norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
+    num_layers, dropout)
+
+# 解码器实例化
+decoder = TransformerDecoder(
+    len(tgt_vocab), key_size, query_size, value_size, num_hiddens,
+    norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
+    num_layers, dropout)
+
+# 组合编码器-解码器模型
+net = d2l.EncoderDecoder(encoder, decoder)
+
+# 开始训练
+d2l.train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device)
 ```
