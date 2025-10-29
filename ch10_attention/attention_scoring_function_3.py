@@ -62,7 +62,8 @@ class AdditiveAttention(nn.Module):
         return torch.bmm(self.dropout(self.attention_weights), values) # bmm 批量矩阵乘法
 
 
-queries,  = torch.normal(0, 1, (2, 1, 20)) # 生成形状为 (2, 1, 20) 的张量，其中每个元素都从标准正态分布 N(0,1) 中独立采样
+# queries,  = torch.normal(0, 1, (2, 1, 20))
+queries = torch.normal(0, 1, (2, 1, 20)) # 生成形状为 (2, 1, 20) 的张量，其中每个元素都从标准正态分布 N(0,1) 中独立采样
 keys = torch.ones((2, 10, 2))
 # values的小批量，两个值矩阵是相同的
 values = torch.arange(40, dtype=torch.float32).reshape(1, 10, 4).repeat(

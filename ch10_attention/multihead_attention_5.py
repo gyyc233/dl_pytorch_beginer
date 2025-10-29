@@ -3,6 +3,10 @@ import torch
 from torch import nn
 from d2l import torch as d2l
 
+import sys
+sys.path.append('./ch10_attention')
+import attention_scoring_function_3 as attention_scoring_function_3
+
 # 多头注意力
 # 使用独立学习得到的多组不同的线性投影来变换查询Q，键K和值V，然后，这组变换后的查询、键和值将并行地送到注意力汇聚中
 # 最后，将h个注意力汇聚的输出拼接在一起， 并且通过另一个可以学习的线性投影进行变换,以产生最后的输出
@@ -58,7 +62,7 @@ class MultiHeadAttention(nn.Module):
         '''
         super(MultiHeadAttention, self).__init__(**kwargs)
         self.num_heads = num_heads
-        self.attention = d2l.DotProductAttention(dropout) # 点击注意力汇聚
+        self.attention = attention_scoring_function_3.DotProductAttention(dropout) # 点击注意力汇聚
         # Q K V 的线性变换层
         self.W_q = nn.Linear(query_size, num_hiddens, bias=bias)
         self.W_k = nn.Linear(key_size, num_hiddens, bias=bias)
@@ -108,6 +112,3 @@ num_kvpairs, valid_lens =  6, torch.tensor([3, 2])
 X = torch.ones((batch_size, num_queries, num_hiddens))
 Y = torch.ones((batch_size, num_kvpairs, num_hiddens))
 attention(X, Y, Y, valid_lens).shape
-
-
-
