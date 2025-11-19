@@ -1,4 +1,5 @@
-
+- [Adadelta算法](#adadelta算法)
+- [小结](#小结)
 
 ## Adadelta算法
 
@@ -32,3 +33,24 @@ def adadelta(params, states, hyperparams):
             delta[:] = rho * delta + (1 - rho) * g * g
         p.grad.data.zero_()
 ```
+
+每次参数更新，$\rho=0.9$对应10个半衰期
+
+```python
+data_iter, feature_dim = d2l.get_data_ch11(batch_size=10)
+d2l.train_ch11(adadelta, init_adadelta_states(feature_dim),
+               {'rho': 0.9}, data_iter, feature_dim);
+```
+
+简洁实现
+
+```python
+trainer = torch.optim.Adadelta
+d2l.train_concise_ch11(trainer, {'rho': 0.9}, data_iter)
+```
+
+## 小结
+
+- `Adadelta`没有学习率参数。相反，它使用参数本身的变化率来调整学习率
+- `Adadelta`需要两个状态变量来存储梯度的二阶导数和参数的变化
+- `Adadelta`使用泄漏的平均值来保持对适当统计数据的运行估计
